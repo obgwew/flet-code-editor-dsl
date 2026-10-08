@@ -12,7 +12,7 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [What's New in 0.2.0 / Migration from 0.1.x](#whats-new-in-020--migration-from-01x)
+2. [What's New in 0.2.0 / Migration from the Previous API](#whats-new-in-020--migration-from-the-previous-api)
 3. [Features](#features)
 4. [Requirements](#requirements)
 5. [Installation](#installation)
@@ -76,11 +76,11 @@ lang = ce.Language(
 
 and hand `lang.to_json()` to the editor.
 
-## What's New in 0.2.0 / Migration from 0.1.x
+## What's New in 0.2.0 / Migration from the Previous API
 
-Version 0.2.0 is a **rewrite of the public API**. The 0.1.x regex/`rule()`/`pair()` helpers no longer exist.
+Version 0.2.0 is a **rewrite of the public API**. The earlier regex-based `CodeEditor` control and its `rule()` / `group()` / `pair()` helpers no longer exist.
 
-| 0.1.x | 0.2.0 |
+| Previous API | 0.2.0 |
 |-------|-------|
 | Control `CodeEditor` (type `flet_code_editor_dsl`) | `FletCodeEditor` (new, tokenizer based) and `FletCodeField` (regex based) |
 | `rule()`, `group()` + `rules_json()` | `Language(words=[WordGroup(...)], strings=..., ...)` + `Language.to_json()` for the editor; `HighlightRule` list for `FletCodeField` |
@@ -143,7 +143,7 @@ Declare it in your app's `pyproject.toml`:
 ```toml
 [project]
 name = "my-flet-app"
-version = "0.1.0"
+version = "1.0.0"
 requires-python = ">=3.10"
 dependencies = [
   "flet>=0.85.2",
@@ -767,7 +767,7 @@ Behavior and gotchas:
 
 - Patterns use the **Dart `RegExp`** engine (ECMAScript-style, `multiLine` on). Use `(?<name>...)` instead of Python's `(?P<name>...)`, and raw strings (`r"..."`) in Python.
 - Patterns or colors that fail to parse are silently skipped.
-- **The first matching rule wins** for each character: a character already colored by an earlier rule is not recolored by later ones. Put your most specific rules (strings, comments) **first** and general rules (identifiers) **last**. This is the opposite of the 0.1.x engine.
+- **The first matching rule wins** for each character: a character already colored by an earlier rule is not recolored by later ones. Put your most specific rules (strings, comments) **first** and general rules (identifiers) **last**. This is the opposite of the previous `CodeEditor` engine, where later rules overrode earlier ones.
 - Rules are re-compiled only when the list changes; ordinary typing never recompiles regexes.
 - In incremental mode every line is highlighted independently, so multi-line constructs (block comments, triple-quoted strings) cannot be highlighted. Use `FletCodeEditor` for those.
 - The font is fixed to Consolas, size 12. There are no `font_*` or color properties.
@@ -985,7 +985,7 @@ page.add(
 | Change | Rebuild needed? |
 |--------|-----------------|
 | Editing Python code, `value`, `language` / `Language(...)`, colors, fonts, flags, sizes, layout | No — sent to the client at runtime. |
-| Updating `flet-code-editor-dsl` to a version whose Dart code changed (for example 0.1.x → 0.2.0) | **Yes** |
+| Updating `flet-code-editor-dsl` to a version whose Dart code changed (for example when upgrading to 0.2.0 from the previous API) | **Yes** |
 | Upgrading Flet itself to a new major/minor version | Yes |
 | Adding or removing other Flet extensions | Yes |
 
@@ -1014,6 +1014,9 @@ flet build web
 ```text
 flet-code-editor-dsl/
 ├── README.md
+├── LICENSE
+├── FUNDING.yml
+├── .gitignore
 ├── pyproject.toml
 └── src/
     ├── flet_code_editor_dsl/
@@ -1041,9 +1044,17 @@ flet-code-editor-dsl/
 | `code_editor.dart` | Editor widget: value sync and debounce, language parsing, sizing logic, line numbers, fold indicator. |
 | `tokenizer.dart` | `CodeLanguage.fromJson`, the stateful lexer (`lexLine`), the cached `LineHighlighter` and the `FoldAnalyzer`. |
 | `flet_code_editor_dsl.dart` (Flutter) | `FletCodeField` widget and its per-line cached regex controller. |
-| `pyproject.toml` | Packaging metadata; includes `pubspec.yaml` and `lib/**/*` as package data. |
+| `pyproject.toml` | Packaging metadata (setuptools). Includes everything under the `flutter.flet_code_editor_dsl` package (`**/*`, i.e. `pubspec.yaml` and `lib/`) as package data so `flet build` can find the Flutter code. |
 
-> `__pycache__/*.pyc` and `*.egg-info/` are build artifacts and should not be committed; add them to `.gitignore`.
+> `__pycache__/`, `*.pyc` and `*.egg-info/` are generated automatically (by Python and by `pip install -e .` / the build) and are not part of the source. Keep them out of the repository with a `.gitignore`:
+>
+> ```gitignore
+> __pycache__/
+> *.pyc
+> *.egg-info/
+> build/
+> dist/
+> ```
 
 ---
 
@@ -1065,7 +1076,7 @@ flet-code-editor-dsl/
 | Symptom | Likely cause and fix |
 |---------|----------------------|
 | "Unknown control" error or the editor does not appear | The library is not declared in `pyproject.toml`, or the app was not built with it. Add it to `dependencies` and run `flet build`. |
-| Error after upgrading from 0.1.x (`CodeEditor`, `rule`, `rules_json` not found) | These were removed in 0.2.0. See [Migration](#whats-new-in-020--migration-from-01x). Rebuild the app. |
+| Error after upgrading (`CodeEditor`, `rule`, `rules_json` not found) | These were removed in 0.2.0. See [Migration](#whats-new-in-020--migration-from-the-previous-api). Rebuild the app. |
 | The editor is tiny | `width_level` / `height_level` default to 13 (of 30). Set `expand=True`, `width`/`height`, or levels up to 30. |
 | No colors at all | `language` is empty or not valid JSON — make sure you passed `Language(...).to_json()` (a string), not the object. Also check `syntax_highlighting=True`. |
 | Text is hard to see on a dark background | Set `default_color` (for example `"#D4D4D4"`) together with `background_color`. |
