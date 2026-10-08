@@ -1,19 +1,35 @@
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "flet-code-editor-dsl"
-version = "0.1.0"
-description = "A real Flutter code editor exposed as a Flet control"
+version = "0.2.0"
+description = "Flet code editor control with syntax highlighting, line numbers and scroll modes"
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["flet"]
+authors = [
+    { name = "Flet contributors", email = "you@example.com" }
+]
+dependencies = [
+    "flet>=0.85.2",
+]
 
-[tool.setuptools]
-package-dir = { "" = "src" }
+[dependency-groups]
+dev = [
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]"
+]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[project.urls]
+Homepage = "https://mydomain.dev"
+Documentation = "https://github.com/MyGithubAccount/flet-code-editor-dsl"
+Repository = "https://github.com/MyGithubAccount/flet-code-editor-dsl"
+Issues = "https://github.com/MyGithubAccount/flet-code-editor-dsl/issues"
 
 [tool.setuptools.package-data]
-"flutter.flet_code_editor_dsl" = ["pubspec.yaml", "lib/**/*"]
+"flutter.flet_code_editor_dsl" = ["**/*"]
+
+[tool.setuptools]
+license-files = []
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
