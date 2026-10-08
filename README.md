@@ -12,7 +12,7 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [What's New in 0.2.0 / Migration from the Previous API](#whats-new-in-020--migration-from-the-previous-api)
+2. [What's New in 0.2.1 / Migration from the Previous API](#whats-new-in-020--migration-from-the-previous-api)
 3. [Features](#features)
 4. [Requirements](#requirements)
 5. [Installation](#installation)
