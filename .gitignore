@@ -1,0 +1,11 @@
+@"
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+token.env
+MANIFEST.in
+"@ | Out-File -Encoding utf8 .gitignore
+example/
+.testenv/

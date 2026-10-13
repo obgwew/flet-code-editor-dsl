@@ -1,0 +1,15 @@
+[project]
+name = "editor-test"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+  "flet>=0.85.2",
+  "flet-code-editor-dsl @ file:///C:/coding/flet-code-editor-dsl/dist/flet_code_editor_dsl-0.3.0-py3-none-any.whl",
+]
+
+[tool.flet]
+org = "dev.example"
+product = "Editor Test"
+
+[tool.flet.app]
+path = "src"

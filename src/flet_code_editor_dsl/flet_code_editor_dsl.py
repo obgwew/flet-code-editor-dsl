@@ -3,12 +3,21 @@ from enum import Enum
 
 import flet as ft
 
+from .language import FoldRule
+
 
 @dataclass
 class HighlightRule:
-    """Regex rule. Used by FletCodeField only (FletCodeEditor uses `Language`)."""
+    """Regex rule used by EditorRegex. The first rule that matches a character wins."""
     pattern: str
     color: str
+
+
+@dataclass
+class ErrorPattern:
+    """Regex whose matches are underlined as errors (EditorRegex)."""
+    pattern: str
+    message: str = ""
 
 
 class VerticalMode(str, Enum):
@@ -17,59 +26,122 @@ class VerticalMode(str, Enum):
     UNLIMITED = "unlimited"  # grows with the text, no limit
 
 
-@ft.control("FletCodeField")
-class FletCodeField(ft.LayoutControl):
+class ScrollMode(str, Enum):
+    PAGE_FIRST = "page_first"      # page scrolls first, the editor moves after the page reached its limit
+    EDITOR_FIRST = "editor_first"  # editor scrolls first, the rest of the drag goes to the page
+    EDITOR_ONLY = "editor_only"    # no hand-off
+
+
+class ToolbarPosition(str, Enum):
+    BOTTOM = "bottom"
+    TOP = "top"
+
+
+DEFAULT_TOOLBAR_ITEMS = [
+    "undo", "redo", "cut", "copy", "paste", "select_all", "select_mode",
+    "left", "right", "up", "down", "home", "end", "tab",
+]
+
+
+@ft.control("EditorRegex")
+class EditorRegex(ft.LayoutControl):
     """
-    TextField-based code field with regex highlighting (per-line cached).
+    Code editor whose highlighting is driven by regular expressions.
+    Same features as EditorTokens (line numbers, error underlines, folding,
+    mobile controls...), different engine: rules are regexes matched per line.
     """
     value: str = ""
+
+    # --- engine: regex ---
     rules: list[HighlightRule] = field(default_factory=list)
+    error_rules: list[ErrorPattern] = field(default_factory=list)  # matches are underlined
+    error_color: str = "#F44747"
+    wavy: bool = True
+    folds: list[FoldRule] = field(default_factory=list)
+    fold_by_indent: bool = False
 
+    # --- common ---
     line_numbers: bool = True
     syntax_highlighting: bool = True
-    incremental_highlighting: bool = True
-    wrap: bool = False
-    vertical_mode: VerticalMode = VerticalMode.FIXED
-    min_lines: int | None = None
-    max_lines: int | None = None
-
-    on_change: ft.ControlEventHandler["FletCodeField"] | None = None
-
-
-@ft.control("FletCodeEditor")
-class FletCodeEditor(ft.LayoutControl):
-    """
-    Custom code editor (not a TextField). Every line is laid out and painted
-    independently and only visible lines are built. Highlighting uses a
-    hand-written tokenizer configured by `language` (see `Language`).
-    """
-    value: str = ""
-    # JSON produced by `Language(...).to_json()`; "" = no highlighting.
-    language: str = ""
-
-    line_numbers: bool = True
-    syntax_highlighting: bool = True
-    show_errors: bool = True              # error underlines (needs Language.errors)
-    code_folding: bool = True             # fold markers (needs Language.folds)
+    show_errors: bool = True
+    code_folding: bool = True
     wrap: bool = False
     read_only: bool = False
 
-    # Visible size of the editor box, 1..30: level/30 of the available space
-    # (30 covers it, 1 is a small box). None = use width/height/expand.
-    # Ignored when width/height/expand is set explicitly.
     width_level: int | None = 13
     height_level: int | None = 13
-
     vertical_mode: VerticalMode = VerticalMode.FIXED
     min_lines: int | None = None
     max_lines: int | None = None
 
     font_family: str = "Consolas"
     font_size: float = 12.0
-    default_color: str | None = None      # text color for unstyled text
-    background_color: str | None = None   # editor background
-
-    # Delay (ms) before the text is sent back to Python / on_change fires.
+    default_color: str | None = None
+    background_color: str | None = None
     debounce_ms: int = 150
 
-    on_change: ft.ControlEventHandler["FletCodeEditor"] | None = None
+    # --- mobile ---
+    # Menu shown at the caret / selection handles (phones): cut, copy, paste...
+    selection_menu: bool = True
+    selection_menu_items: list[str] = field(
+        default_factory=lambda: ["cut", "copy", "paste", "select_all"]
+    )  # also: "undo", "redo"
+    # Optional extra bar in the UI (off by default). None/False = hidden.
+    mobile_controls: bool | None = None
+    toolbar_items: list[str] = field(default_factory=lambda: list(DEFAULT_TOOLBAR_ITEMS))
+    toolbar_position: ToolbarPosition = ToolbarPosition.BOTTOM
+    cursor_pad: bool | None = None        # draggable pad to move the caret smoothly
+    magnifier: bool | None = None         # magnifier while a finger is held (long press)
+    magnifier_size: float = 110.0
+    magnifier_zoom: float = 1.6
+    scroll_mode: ScrollMode = ScrollMode.PAGE_FIRST
+
+    on_change: ft.ControlEventHandler["EditorRegex"] | None = None
+
+
+@ft.control("EditorTokens")
+class EditorTokens(ft.LayoutControl):
+    """
+    Code editor whose highlighting is driven by a hand-written tokenizer
+    (no regex) configured by `language` (see `Language`).
+    """
+    value: str = ""
+
+    # --- engine: tokenizer ---
+    language: str = ""   # JSON from `Language(...).to_json()`; "" = no highlighting
+
+    # --- common ---
+    line_numbers: bool = True
+    syntax_highlighting: bool = True
+    show_errors: bool = True
+    code_folding: bool = True
+    wrap: bool = False
+    read_only: bool = False
+
+    width_level: int | None = 13
+    height_level: int | None = 13
+    vertical_mode: VerticalMode = VerticalMode.FIXED
+    min_lines: int | None = None
+    max_lines: int | None = None
+
+    font_family: str = "Consolas"
+    font_size: float = 12.0
+    default_color: str | None = None
+    background_color: str | None = None
+    debounce_ms: int = 150
+
+    # --- mobile ---
+    selection_menu: bool = True
+    selection_menu_items: list[str] = field(
+        default_factory=lambda: ["cut", "copy", "paste", "select_all"]
+    )
+    mobile_controls: bool | None = None
+    toolbar_items: list[str] = field(default_factory=lambda: list(DEFAULT_TOOLBAR_ITEMS))
+    toolbar_position: ToolbarPosition = ToolbarPosition.BOTTOM
+    cursor_pad: bool | None = None
+    magnifier: bool | None = None
+    magnifier_size: float = 110.0
+    magnifier_zoom: float = 1.6
+    scroll_mode: ScrollMode = ScrollMode.PAGE_FIRST
+
+    on_change: ft.ControlEventHandler["EditorTokens"] | None = None

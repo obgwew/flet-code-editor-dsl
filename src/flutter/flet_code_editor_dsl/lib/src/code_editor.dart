@@ -2,48 +2,118 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flet/flet.dart';
 import 'package:re_editor/re_editor.dart';
 
+import 'regex_highlighter.dart';
 import 'tokenizer.dart';
 
-/// FletCodeEditor: a fully custom editor (re_editor). Each line is laid out
-/// and painted independently and only visible lines are built. Highlighting,
-/// error underlines and folding are driven by the `Language` description
-/// (see tokenizer.dart); no regexes are involved.
-class FletCodeEditorControl extends StatefulWidget {
+/// Shared editor widget (re_editor). The only difference between
+/// `EditorTokens` and `EditorRegex` is the highlighting engine:
+///   regexMode == false -> hand-written tokenizer (`Language` JSON)
+///   regexMode == true  -> regular expressions (`rules` / `error_rules`)
+/// Everything else (line numbers, errors, folding, mobile controls,
+/// magnifier, scroll hand-off, cut/copy/paste) is common.
+class FletEditorControl extends StatefulWidget {
   final Control control;
+  final bool regexMode;
 
-  FletCodeEditorControl({Key? key, required this.control})
+  FletEditorControl({Key? key, required this.control, required this.regexMode})
       : super(key: key ?? ValueKey("control_${control.id}"));
 
   @override
-  State<FletCodeEditorControl> createState() => _FletCodeEditorControlState();
+  State<FletEditorControl> createState() => _FletEditorControlState();
 }
 
-class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
+/// "page_first": the page (nearest vertical Scrollable above the editor)
+/// consumes a vertical drag until it reaches its limit in that direction;
+/// only then does the editor scroll.
+class _PageFirstPhysics extends ClampingScrollPhysics {
+  final ScrollPosition? Function() page;
+  const _PageFirstPhysics(this.page, {super.parent});
+
+  @override
+  _PageFirstPhysics applyTo(ScrollPhysics? ancestor) =>
+      _PageFirstPhysics(page, parent: buildParent(ancestor));
+
+  @override
+  double applyPhysicsToUserOffset(ScrollMetrics position, double offset) {
+    if (position.axis == Axis.vertical && offset != 0) {
+      final p = page();
+      if (p != null) {
+        final canPage = offset > 0
+            ? p.pixels > p.minScrollExtent + 0.5
+            : p.pixels < p.maxScrollExtent - 0.5;
+        if (canPage) {
+          final target =
+              (p.pixels - offset).clamp(p.minScrollExtent, p.maxScrollExtent);
+          p.jumpTo(target.toDouble());
+          return 0; // the editor itself does not move
+        }
+      }
+    }
+    return super.applyPhysicsToUserOffset(position, offset);
+  }
+}
+
+const Map<String, IconData> _toolbarIcons = {
+  "undo": Icons.undo,
+  "redo": Icons.redo,
+  "cut": Icons.content_cut,
+  "copy": Icons.content_copy,
+  "paste": Icons.content_paste,
+  "select_all": Icons.select_all,
+  "select_mode": Icons.highlight_alt,
+  "left": Icons.keyboard_arrow_left,
+  "right": Icons.keyboard_arrow_right,
+  "up": Icons.keyboard_arrow_up,
+  "down": Icons.keyboard_arrow_down,
+  "home": Icons.first_page,
+  "end": Icons.last_page,
+  "tab": Icons.keyboard_tab,
+};
+
+const List<String> _defaultToolbar = [
+  "undo", "redo", "cut", "copy", "paste", "select_all", "select_mode",
+  "left", "right", "up", "down", "home", "end", "tab",
+];
+
+class _FletEditorControlState extends State<FletEditorControl> {
   late final CodeLineEditingController _controller;
   Timer? _debounce;
 
-  // Last value read from the Flet control (detects changes made from Python).
   String _propValue = "";
-  // Last text pushed to Python (ignores our own echo).
   String _lastSent = "";
 
   // Language / feature state.
   String _sig = "";
   String _languageJson = "";
   CodeLanguage? _language;
-  LineHighlighter? _highlighter;
+  CodeHighlighter? _highlighter;
   CodeChunkAnalyzer _chunkAnalyzer = NonCodeChunkAnalyzer();
   bool _showFoldIndicator = false;
-  int _epoch = 0; // bumped when language/flags change, to repaint every line
+  int _epoch = 0;
 
   int _lineCount = 1;
   double _lineHeightFor = -1;
   String _lineHeightFamily = "";
   double _lineHeight = 16;
+
+  // Mobile helpers.
+  bool _selectMode = false; // cursor pad / arrows extend the selection
+  Timer? _lpTimer;
+  Offset? _down;
+  int? _pointer;
+  final ValueNotifier<Offset?> _magnifierAt = ValueNotifier<Offset?>(null);
+
+  bool get _isMobilePlatform =>
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
 
   @override
   void initState() {
@@ -61,12 +131,13 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _lpTimer?.cancel();
+    _magnifierAt.dispose();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
   }
 
-  // Called by the editor for every line it paints.
   TextSpan _spanBuilder({
     required CodeLine codeLine,
     required BuildContext context,
@@ -82,15 +153,12 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
   void _onControllerChanged() {
     if (!mounted) return;
     _highlighter?.onLinesChanged(_controller.codeLines);
-
-    // Resize in "bounded"/"unlimited" modes.
     final mode = widget.control.getString("vertical_mode", "fixed")!;
     if (mode == "fixed") return;
     final n = _controller.codeLines.length;
     if (n != _lineCount) setState(() => _lineCount = n);
   }
 
-  // Called by the editor on every text change.
   void _handleChanged(CodeLineEditingValue value) {
     final text = _controller.text;
     if (text == _lastSent) return;
@@ -115,7 +183,7 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
       if (data is! Map<String, dynamic>) return null;
       return CodeLanguage.fromJson(data);
     } catch (_) {
-      return null; // invalid language spec: no highlighting
+      return null;
     }
   }
 
@@ -136,11 +204,348 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
     return _lineHeight;
   }
 
-  /// Visible size from a level 1..30: level / 30 of the available space
-  /// (level 30 covers it, level 1 is a small box), with a small minimum.
   double _levelSize(int level, double available) {
     final l = level < 1 ? 1 : (level > 30 ? 30 : level);
     return math.max(48.0, available * l / 30.0);
+  }
+
+  // ------------------------------------------------------------------
+  // Clipboard / cursor actions (used by the mobile toolbar).
+  // Paste is implemented here instead of relying on the built-in path:
+  // text is read straight from the platform clipboard, line endings are
+  // normalised and control characters are removed before insertion.
+  // ------------------------------------------------------------------
+  Future<void> _copy() async {
+    final t = _controller.selectedText;
+    if (t.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: t));
+  }
+
+  Future<void> _cut() async {
+    if (widget.control.getBool("read_only", false)!) return _copy();
+    final t = _controller.selectedText;
+    if (t.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: t));
+    _controller.replaceSelection("");
+  }
+
+  Future<void> _paste() async {
+    if (widget.control.getBool("read_only", false)!) return;
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    var t = data?.text;
+    if (t == null || t.isEmpty) return;
+    t = t
+        .replaceAll("\r\n", "\n")
+        .replaceAll("\r", "\n")
+        .replaceAll("\u0000", "")
+        .replaceAll("\u2028", "\n")
+        .replaceAll("\u2029", "\n");
+    if (t.isEmpty) return;
+    _controller.replaceSelection(t);
+  }
+
+  void _step(AxisDirection d) {
+    if (_selectMode) {
+      _controller.extendSelection(d);
+    } else {
+      _controller.moveCursor(d);
+    }
+  }
+
+  void _lineEdge(bool toEnd) {
+    if (_selectMode) {
+      toEnd
+          ? _controller.extendSelectionToLineEnd()
+          : _controller.extendSelectionToLineStart();
+    } else {
+      toEnd
+          ? _controller.moveCursorToLineEnd()
+          : _controller.moveCursorToLineStart();
+    }
+  }
+
+  Future<void> _act(String id) async {
+    final readOnly = widget.control.getBool("read_only", false)!;
+    switch (id) {
+      case "undo":
+        if (!readOnly) _controller.undo();
+        break;
+      case "redo":
+        if (!readOnly) _controller.redo();
+        break;
+      case "cut":
+        await _cut();
+        break;
+      case "copy":
+        await _copy();
+        break;
+      case "paste":
+        await _paste();
+        break;
+      case "select_all":
+        _controller.selectAll();
+        break;
+      case "select_mode":
+        setState(() => _selectMode = !_selectMode);
+        break;
+      case "left":
+        _step(AxisDirection.left);
+        break;
+      case "right":
+        _step(AxisDirection.right);
+        break;
+      case "up":
+        _step(AxisDirection.up);
+        break;
+      case "down":
+        _step(AxisDirection.down);
+        break;
+      case "home":
+        _lineEdge(false);
+        break;
+      case "end":
+        _lineEdge(true);
+        break;
+      case "tab":
+        if (!readOnly) _controller.replaceSelection("  ");
+        break;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Menu that appears at the caret / selection handles (phones). Without a
+  // toolbarController re_editor shows no menu at all.
+  // ------------------------------------------------------------------
+  late final SelectionToolbarController _selectionToolbar =
+      MobileSelectionToolbarController(builder: _selectionMenu);
+
+  Widget _selectionMenu({
+    required BuildContext context,
+    required TextSelectionToolbarAnchors anchors,
+    required CodeLineEditingController controller,
+    required VoidCallback onDismiss,
+    required VoidCallback onRefresh,
+  }) {
+    final c = widget.control;
+    final readOnly = c.getBool("read_only", false)!;
+    final raw = c.get("selection_menu_items");
+    final ids = raw is List
+        ? [for (final i in raw) i.toString()]
+        : const ["cut", "copy", "paste", "select_all"];
+    final hasSel = controller.selectedText.isNotEmpty;
+
+    ContextMenuButtonItem item(
+      String id,
+      ContextMenuButtonType type,
+      Future<void> Function() run, {
+      String? label,
+    }) =>
+        ContextMenuButtonItem(
+          type: type,
+          label: label,
+          onPressed: () async {
+            await run();
+            onDismiss();
+          },
+        );
+
+    final items = <ContextMenuButtonItem>[];
+    for (final id in ids) {
+      switch (id) {
+        case "cut":
+          if (hasSel && !readOnly) {
+            items.add(item(id, ContextMenuButtonType.cut, _cut));
+          }
+          break;
+        case "copy":
+          if (hasSel) items.add(item(id, ContextMenuButtonType.copy, _copy));
+          break;
+        case "paste":
+          if (!readOnly) {
+            items.add(item(id, ContextMenuButtonType.paste, _paste));
+          }
+          break;
+        case "select_all":
+          items.add(item(id, ContextMenuButtonType.selectAll,
+              () async => controller.selectAll()));
+          break;
+        case "undo":
+          if (!readOnly) {
+            items.add(item(id, ContextMenuButtonType.custom,
+                () async => controller.undo(),
+                label: "Undo"));
+          }
+          break;
+        case "redo":
+          if (!readOnly) {
+            items.add(item(id, ContextMenuButtonType.custom,
+                () async => controller.redo(),
+                label: "Redo"));
+          }
+          break;
+      }
+    }
+    if (items.isEmpty) return const SizedBox.shrink();
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: anchors,
+      buttonItems: items,
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Magnifier: shown while a touch is held (long press) inside the editor.
+  // ------------------------------------------------------------------
+  void _onPointerDown(PointerDownEvent e) {
+    if (e.kind != PointerDeviceKind.touch) return;
+    if (_pointer != null) return;
+    _pointer = e.pointer;
+    _down = e.localPosition;
+    _lpTimer?.cancel();
+    _lpTimer = Timer(const Duration(milliseconds: 420), () {
+      if (!mounted || _down == null) return;
+      _magnifierAt.value = _down;
+    });
+  }
+
+  void _onPointerMove(PointerMoveEvent e) {
+    if (e.pointer != _pointer || _down == null) return;
+    if (_magnifierAt.value != null) {
+      _magnifierAt.value = e.localPosition;
+    } else if ((e.localPosition - _down!).distance > 14) {
+      _lpTimer?.cancel(); // it is a scroll/drag, not a long press
+      _down = null;
+    }
+  }
+
+  void _onPointerEnd(PointerEvent e) {
+    if (e.pointer != _pointer) return;
+    _pointer = null;
+    _down = null;
+    _lpTimer?.cancel();
+    _magnifierAt.value = null;
+  }
+
+  Widget _magnifierLayer(double size, double zoom) {
+    return ValueListenableBuilder<Offset?>(
+      valueListenable: _magnifierAt,
+      builder: (context, p, _) {
+        if (p == null) return const SizedBox.shrink();
+        const gap = 28.0;
+        return Positioned(
+          left: p.dx - size / 2,
+          top: p.dy - size - gap,
+          child: IgnorePointer(
+            child: RawMagnifier(
+              size: Size(size, size),
+              magnificationScale: zoom,
+              focalPointOffset: Offset(0, size / 2 + gap),
+              decoration: const MagnifierDecoration(
+                shape: CircleBorder(
+                  side: BorderSide(color: Colors.white70, width: 2),
+                ),
+                shadows: [
+                  BoxShadow(blurRadius: 8, color: Colors.black38),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Scroll hand-off between the editor and the page around it.
+  // ------------------------------------------------------------------
+  ScrollPosition? _pageScroll() {
+    if (!mounted) return null;
+    final p = Scrollable.maybeOf(context)?.position;
+    if (p == null || p.axis != Axis.vertical) return null;
+    return p;
+  }
+
+  Widget _withScrollMode(Widget editor, String mode) {
+    if (mode == "editor_only") return editor;
+
+    if (mode == "page_first") {
+      final base = ScrollConfiguration.of(context);
+      return ScrollConfiguration(
+        behavior: base.copyWith(physics: _PageFirstPhysics(_pageScroll)),
+        child: editor,
+      );
+    }
+
+    // "editor_first": when the editor hits its limit, the remaining drag
+    // is passed on to the page.
+    return NotificationListener<OverscrollNotification>(
+      onNotification: (n) {
+        if (n.metrics.axis != Axis.vertical || n.dragDetails == null) {
+          return false;
+        }
+        final p = _pageScroll();
+        if (p == null) return false;
+        final target = (p.pixels + n.overscroll)
+            .clamp(p.minScrollExtent, p.maxScrollExtent)
+            .toDouble();
+        if (target != p.pixels) p.jumpTo(target);
+        return false;
+      },
+      child: editor,
+    );
+  }
+
+  // ------------------------------------------------------------------
+  Widget _buildToolbar({
+    required List<String> items,
+    required bool pad,
+    required Color bg,
+    required Color fg,
+  }) {
+    final buttons = <Widget>[];
+    for (final id in items) {
+      final icon = _toolbarIcons[id];
+      if (icon == null) continue;
+      final active = id == "select_mode" && _selectMode;
+      buttons.add(InkResponse(
+        onTap: () => _act(id),
+        radius: 22,
+        child: Container(
+          width: 44,
+          height: 44,
+          alignment: Alignment.center,
+          decoration: active
+              ? BoxDecoration(
+                  color: fg.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(8),
+                )
+              : null,
+          child: Icon(icon, size: 22, color: fg),
+        ),
+      ));
+    }
+    return ExcludeFocus(
+      child: Material(
+        color: bg,
+        child: SizedBox(
+          height: 44,
+          child: Row(
+            children: [
+              if (pad)
+                _CursorPad(
+                  color: fg,
+                  onStep: _step,
+                ),
+              Expanded(
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: buttons,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -157,31 +562,69 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
       }
     }
 
-    // Language and feature flags: re-created only when something changed.
-    final languageJson = control.getString("language", "")!;
+    // Engine / feature flags: re-created only when something changed.
     final enabled = control.getBool("syntax_highlighting", true)!;
     final showErrors = control.getBool("show_errors", true)!;
     final folding = control.getBool("code_folding", true)!;
-    final sig = "$enabled|$showErrors|$folding|$languageJson";
+
+    final String languageJson =
+        widget.regexMode ? "" : control.getString("language", "")!;
+    final dynamic rxRules = widget.regexMode ? control.get("rules") : null;
+    final dynamic rxErrs = widget.regexMode ? control.get("error_rules") : null;
+    final dynamic rxFolds = widget.regexMode ? control.get("folds") : null;
+    final String? rxErrColor =
+        widget.regexMode ? control.getString("error_color") : null;
+    final bool rxWavy = control.getBool("wavy", true)!;
+    final bool rxFoldIndent = control.getBool("fold_by_indent", false)!;
+
+    final sig = widget.regexMode
+        ? "$enabled|$showErrors|$folding|$rxRules|$rxErrs|$rxFolds|$rxErrColor|$rxWavy|$rxFoldIndent"
+        : "$enabled|$showErrors|$folding|$languageJson";
+
     if (sig != _sig) {
       _sig = sig;
-      if (languageJson != _languageJson || _language == null) {
-        _languageJson = languageJson;
-        _language = _parseLanguage(languageJson);
+      List<FoldRuleSpec> folds = const [];
+      var byIndent = false;
+      CodeHighlighter? hl;
+
+      if (widget.regexMode) {
+        final spec = RegexSpec.fromValues(
+          rules: rxRules,
+          errorRules: rxErrs,
+          folds: rxFolds,
+          errorColor: rxErrColor,
+          wavy: rxWavy,
+          foldByIndent: rxFoldIndent,
+        );
+        hl = (enabled && spec.hasHighlighting)
+            ? RegexHighlighter(spec, showErrors: showErrors)
+            : null;
+        folds = spec.folds;
+        byIndent = spec.foldByIndent;
+      } else {
+        if (languageJson != _languageJson || _language == null) {
+          _languageJson = languageJson;
+          _language = _parseLanguage(languageJson);
+        }
+        final lang = _language;
+        hl = (enabled && lang != null)
+            ? LineHighlighter(lang, showErrors: showErrors)
+            : null;
+        folds = lang?.folds ?? const [];
+        byIndent = lang?.foldByIndent ?? false;
       }
-      final lang = _language;
-      _highlighter = (enabled && lang != null)
-          ? LineHighlighter(lang, showErrors: showErrors)
-          : null;
+
+      _highlighter = hl;
       _highlighter?.onLinesChanged(_controller.codeLines);
-      if (folding && lang != null && lang.hasFolding) {
-        _chunkAnalyzer = FoldAnalyzer(lang.folds, lang.foldByIndent);
+
+      if (folding && (folds.isNotEmpty || byIndent)) {
+        _chunkAnalyzer = FoldAnalyzer(folds, byIndent);
         _showFoldIndicator = true;
       } else {
         _chunkAnalyzer = NonCodeChunkAnalyzer();
         _showFoldIndicator = false;
       }
-      _epoch++; // forces every line to be rebuilt
+      _epoch++;
     }
 
     final fontFamily = control.getString("font_family", "Consolas")!;
@@ -193,6 +636,21 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
     final readOnly = control.getBool("read_only", false)!;
     final showFold = _showFoldIndicator;
 
+    // ---- mobile options (null = automatic by platform) ----
+    final mobile = _isMobilePlatform;
+    final showBar = control.getBool("mobile_controls") ?? false;
+    final selectionMenu = control.getBool("selection_menu", true)!;
+    final showPad = control.getBool("cursor_pad") ?? mobile;
+    final showMag = control.getBool("magnifier") ?? mobile;
+    final magSize = control.getDouble("magnifier_size", 110.0)!;
+    final magZoom = control.getDouble("magnifier_zoom", 1.6)!;
+    final barOnTop = control.getString("toolbar_position", "bottom") == "top";
+    final itemsRaw = control.get("toolbar_items");
+    final items = itemsRaw is List
+        ? [for (final i in itemsRaw) i.toString()]
+        : _defaultToolbar;
+    final scrollMode = control.getString("scroll_mode", "page_first")!;
+
     Widget editor = CodeEditor(
       key: ValueKey("editor_$_epoch"),
       controller: _controller,
@@ -201,6 +659,8 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
       padding: const EdgeInsets.all(4),
       onChanged: _handleChanged,
       chunkAnalyzer: _chunkAnalyzer,
+      toolbarController:
+          (mobile && selectionMenu) ? _selectionToolbar : null,
       style: CodeEditorStyle(
         fontFamily: fontFamily,
         fontSize: fontSize,
@@ -228,6 +688,29 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
           : null,
     );
 
+    editor = _withScrollMode(editor, scrollMode);
+
+    // Pointer tracking + magnifier overlay.
+    Widget core = editor;
+    if (showMag) {
+      core = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: _onPointerDown,
+              onPointerMove: _onPointerMove,
+              onPointerUp: _onPointerEnd,
+              onPointerCancel: _onPointerEnd,
+              child: editor,
+            ),
+          ),
+          _magnifierLayer(magSize, magZoom),
+        ],
+      );
+    }
+
     // Vertical size from the number of lines ("bounded"/"unlimited").
     final vMode = control.getString("vertical_mode", "fixed")!;
     final heightFromLines = vMode == "bounded" || vMode == "unlimited";
@@ -239,11 +722,32 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
         lines = lines.clamp(minL, maxL < minL ? minL : maxL);
       }
       final lineH = _measureLineHeight(fontFamily, fontSize);
-      editor = SizedBox(height: lines * lineH + 8 + 2, child: editor);
+      core = SizedBox(height: lines * lineH + 8 + 2, child: core);
     }
 
-    // Visible box size (levels 1..30). Skipped when the size is given
-    // explicitly (width/height/expand) or derived from the line count.
+    // Toolbar (cut / copy / paste / cursor pad ...).
+    Widget body = core;
+    if (showBar) {
+      final scheme = Theme.of(context).colorScheme;
+      final bar = _buildToolbar(
+        items: items,
+        pad: showPad,
+        bg: bgColor == null
+            ? scheme.surfaceContainerHighest
+            : Color.alphaBlend(Colors.white12, bgColor),
+        fg: textColor ?? scheme.onSurface,
+      );
+      body = Column(
+        mainAxisSize: heightFromLines ? MainAxisSize.min : MainAxisSize.max,
+        children: [
+          if (barOnTop) bar,
+          heightFromLines ? core : Expanded(child: core),
+          if (!barOnTop) bar,
+        ],
+      );
+    }
+
+    // Visible box size (levels 1..30).
     final expandValue = control.get("expand");
     final expanded =
         expandValue == true || (expandValue is num && expandValue > 0);
@@ -255,8 +759,8 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
         : control.getInt("height_level");
 
     if (wl != null || hl != null) {
-      final inner = editor;
-      editor = LayoutBuilder(builder: (ctx, c) {
+      final inner = body;
+      body = LayoutBuilder(builder: (ctx, c) {
         final screen = MediaQuery.sizeOf(ctx);
         final aw = c.maxWidth.isFinite ? c.maxWidth : screen.width;
         final ah = c.maxHeight.isFinite ? c.maxHeight : screen.height;
@@ -268,6 +772,59 @@ class _FletCodeEditorControlState extends State<FletCodeEditorControl> {
       });
     }
 
-    return LayoutControl(control: control, child: editor);
+    return LayoutControl(control: control, child: body);
+  }
+}
+
+/// Draggable pad that moves the caret smoothly: horizontal drag = characters,
+/// vertical drag = lines (like swiping on a space bar).
+class _CursorPad extends StatefulWidget {
+  final Color color;
+  final void Function(AxisDirection) onStep;
+  const _CursorPad({required this.color, required this.onStep});
+
+  @override
+  State<_CursorPad> createState() => _CursorPadState();
+}
+
+class _CursorPadState extends State<_CursorPad> {
+  static const double _stepX = 9;
+  static const double _stepY = 22;
+  double _ax = 0;
+  double _ay = 0;
+
+  void _update(DragUpdateDetails d) {
+    _ax += d.delta.dx;
+    _ay += d.delta.dy;
+    while (_ax.abs() >= _stepX) {
+      widget.onStep(_ax > 0 ? AxisDirection.right : AxisDirection.left);
+      _ax -= _ax > 0 ? _stepX : -_stepX;
+    }
+    while (_ay.abs() >= _stepY) {
+      widget.onStep(_ay > 0 ? AxisDirection.down : AxisDirection.up);
+      _ay -= _ay > 0 ? _stepY : -_stepY;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanStart: (_) {
+        _ax = 0;
+        _ay = 0;
+      },
+      onPanUpdate: _update,
+      child: Container(
+        width: 84,
+        height: 36,
+        margin: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: widget.color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Icon(Icons.open_with, size: 20, color: widget.color),
+      ),
+    );
   }
 }

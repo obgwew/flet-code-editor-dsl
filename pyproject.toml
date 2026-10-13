@@ -1,36 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "flet-code-editor-dsl"
-version = "0.2.0"
-description = "Flet code editor controls with a declarative Language DSL: syntax highlighting, error underlines and code folding"
-readme = "README.md"
+version = "0.3.0"
+description = "Flet code editors with syntax highlighting: EditorTokens (tokenizer) and EditorRegex (regex)"
 requires-python = ">=3.10"
-license = "Apache-2.0"
-authors = [
-    { name = "obgwew" }
-]
-dependencies = [
-    "flet>=0.85.2",
-]
+dependencies = ["flet>=0.85.2"]
 
-[dependency-groups]
-dev = [
-    "mkdocs",
-    "mkdocs-material",
-    "mkdocstrings[python]"
-]
+[tool.setuptools.packages.find]
+where = ["src"]
 
-[project.urls]
-Homepage = "https://github.com/obgwew/flet-code-editor-dsl"
-Documentation = "https://github.com/obgwew/flet-code-editor-dsl"
-Repository = "https://github.com/obgwew/flet-code-editor-dsl"
-Issues = "https://github.com/obgwew/flet-code-editor-dsl/issues"
-
+# The Flutter extension must travel with the Python package;
+# `flet build` looks for it in the installed `flutter/` package.
 [tool.setuptools.package-data]
 "flutter.flet_code_editor_dsl" = ["**/*"]
-
-[tool.setuptools]
-license-files = ["LICENSE"]
-
-[build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
