@@ -80,14 +80,8 @@ class EditorRegex(ft.LayoutControl):
     background_color: str | None = None
     debounce_ms: int = 150
 
-    # --- mobile ---
-    # Menu shown at the caret / selection handles (phones): cut, copy, paste...
-    selection_menu: bool = True
-    selection_menu_items: list[str] = field(
-        default_factory=lambda: ["cut", "copy", "paste", "select_all"]
-    )  # also: "undo", "redo"
-    # Optional extra bar in the UI (off by default). None/False = hidden.
-    mobile_controls: bool | None = None
+    # --- mobile (None = automatic: on for Android/iOS, off elsewhere) ---
+    mobile_controls: bool | None = None   # toolbar: cut/copy/paste/undo/arrows...
     toolbar_items: list[str] = field(default_factory=lambda: list(DEFAULT_TOOLBAR_ITEMS))
     toolbar_position: ToolbarPosition = ToolbarPosition.BOTTOM
     cursor_pad: bool | None = None        # draggable pad to move the caret smoothly
@@ -131,10 +125,6 @@ class EditorTokens(ft.LayoutControl):
     debounce_ms: int = 150
 
     # --- mobile ---
-    selection_menu: bool = True
-    selection_menu_items: list[str] = field(
-        default_factory=lambda: ["cut", "copy", "paste", "select_all"]
-    )
     mobile_controls: bool | None = None
     toolbar_items: list[str] = field(default_factory=lambda: list(DEFAULT_TOOLBAR_ITEMS))
     toolbar_position: ToolbarPosition = ToolbarPosition.BOTTOM

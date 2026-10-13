@@ -253,14 +253,21 @@ class _FletEditorControlState extends State<FletEditorControl> {
   }
 
   void _lineEdge(bool toEnd) {
+    final s = _controller.selection;
+    final idx = s.extentIndex;
+    final off = toEnd ? _controller.codeLines[idx].text.length : 0;
     if (_selectMode) {
-      toEnd
-          ? _controller.extendSelectionToLineEnd()
-          : _controller.extendSelectionToLineStart();
+      _controller.selection = CodeLineSelection(
+        baseIndex: s.baseIndex,
+        baseOffset: s.baseOffset,
+        extentIndex: idx,
+        extentOffset: off,
+      );
     } else {
-      toEnd
-          ? _controller.moveCursorToLineEnd()
-          : _controller.moveCursorToLineStart();
+      _controller.selection = CodeLineSelection.collapsed(
+        index: idx,
+        offset: off,
+      );
     }
   }
 
@@ -310,86 +317,6 @@ class _FletEditorControlState extends State<FletEditorControl> {
         if (!readOnly) _controller.replaceSelection("  ");
         break;
     }
-  }
-
-  // ------------------------------------------------------------------
-  // Menu that appears at the caret / selection handles (phones). Without a
-  // toolbarController re_editor shows no menu at all.
-  // ------------------------------------------------------------------
-  late final SelectionToolbarController _selectionToolbar =
-      MobileSelectionToolbarController(builder: _selectionMenu);
-
-  Widget _selectionMenu({
-    required BuildContext context,
-    required TextSelectionToolbarAnchors anchors,
-    required CodeLineEditingController controller,
-    required VoidCallback onDismiss,
-    required VoidCallback onRefresh,
-  }) {
-    final c = widget.control;
-    final readOnly = c.getBool("read_only", false)!;
-    final raw = c.get("selection_menu_items");
-    final ids = raw is List
-        ? [for (final i in raw) i.toString()]
-        : const ["cut", "copy", "paste", "select_all"];
-    final hasSel = controller.selectedText.isNotEmpty;
-
-    ContextMenuButtonItem item(
-      String id,
-      ContextMenuButtonType type,
-      Future<void> Function() run, {
-      String? label,
-    }) =>
-        ContextMenuButtonItem(
-          type: type,
-          label: label,
-          onPressed: () async {
-            await run();
-            onDismiss();
-          },
-        );
-
-    final items = <ContextMenuButtonItem>[];
-    for (final id in ids) {
-      switch (id) {
-        case "cut":
-          if (hasSel && !readOnly) {
-            items.add(item(id, ContextMenuButtonType.cut, _cut));
-          }
-          break;
-        case "copy":
-          if (hasSel) items.add(item(id, ContextMenuButtonType.copy, _copy));
-          break;
-        case "paste":
-          if (!readOnly) {
-            items.add(item(id, ContextMenuButtonType.paste, _paste));
-          }
-          break;
-        case "select_all":
-          items.add(item(id, ContextMenuButtonType.selectAll,
-              () async => controller.selectAll()));
-          break;
-        case "undo":
-          if (!readOnly) {
-            items.add(item(id, ContextMenuButtonType.custom,
-                () async => controller.undo(),
-                label: "Undo"));
-          }
-          break;
-        case "redo":
-          if (!readOnly) {
-            items.add(item(id, ContextMenuButtonType.custom,
-                () async => controller.redo(),
-                label: "Redo"));
-          }
-          break;
-      }
-    }
-    if (items.isEmpty) return const SizedBox.shrink();
-    return AdaptiveTextSelectionToolbar.buttonItems(
-      anchors: anchors,
-      buttonItems: items,
-    );
   }
 
   // ------------------------------------------------------------------
@@ -638,8 +565,7 @@ class _FletEditorControlState extends State<FletEditorControl> {
 
     // ---- mobile options (null = automatic by platform) ----
     final mobile = _isMobilePlatform;
-    final showBar = control.getBool("mobile_controls") ?? false;
-    final selectionMenu = control.getBool("selection_menu", true)!;
+    final showBar = control.getBool("mobile_controls") ?? mobile;
     final showPad = control.getBool("cursor_pad") ?? mobile;
     final showMag = control.getBool("magnifier") ?? mobile;
     final magSize = control.getDouble("magnifier_size", 110.0)!;
@@ -659,8 +585,6 @@ class _FletEditorControlState extends State<FletEditorControl> {
       padding: const EdgeInsets.all(4),
       onChanged: _handleChanged,
       chunkAnalyzer: _chunkAnalyzer,
-      toolbarController:
-          (mobile && selectionMenu) ? _selectionToolbar : null,
       style: CodeEditorStyle(
         fontFamily: fontFamily,
         fontSize: fontSize,
