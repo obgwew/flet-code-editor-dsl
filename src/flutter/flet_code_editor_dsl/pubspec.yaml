@@ -1,6 +1,6 @@
 name: flet_code_editor_dsl
 description: Flet code editors with syntax highlighting (EditorTokens / EditorRegex)
-version: 0.3.0
+version: 0.3.2
 publish_to: none
 
 environment:

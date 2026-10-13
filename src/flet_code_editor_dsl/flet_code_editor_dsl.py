@@ -37,6 +37,9 @@ class ToolbarPosition(str, Enum):
     TOP = "top"
 
 
+# Buttons of the floating selection menu (Android/iOS). Also accepted: "undo", "redo".
+DEFAULT_SELECTION_MENU_ITEMS = ["cut", "copy", "paste", "select_all"]
+
 DEFAULT_TOOLBAR_ITEMS = [
     "undo", "redo", "cut", "copy", "paste", "select_all", "select_mode",
     "left", "right", "up", "down", "home", "end", "tab",
@@ -81,6 +84,8 @@ class EditorRegex(ft.LayoutControl):
     debounce_ms: int = 150
 
     # --- mobile (None = automatic: on for Android/iOS, off elsewhere) ---
+    selection_menu: bool = True           # floating cut/copy/paste menu at the caret (Android/iOS)
+    selection_menu_items: list[str] = field(default_factory=lambda: list(DEFAULT_SELECTION_MENU_ITEMS))
     mobile_controls: bool | None = None   # toolbar: cut/copy/paste/undo/arrows...
     toolbar_items: list[str] = field(default_factory=lambda: list(DEFAULT_TOOLBAR_ITEMS))
     toolbar_position: ToolbarPosition = ToolbarPosition.BOTTOM
@@ -125,6 +130,8 @@ class EditorTokens(ft.LayoutControl):
     debounce_ms: int = 150
 
     # --- mobile ---
+    selection_menu: bool = True
+    selection_menu_items: list[str] = field(default_factory=lambda: list(DEFAULT_SELECTION_MENU_ITEMS))
     mobile_controls: bool | None = None
     toolbar_items: list[str] = field(default_factory=lambda: list(DEFAULT_TOOLBAR_ITEMS))
     toolbar_position: ToolbarPosition = ToolbarPosition.BOTTOM

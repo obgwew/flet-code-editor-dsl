@@ -83,6 +83,8 @@ const List<String> _defaultToolbar = [
   "left", "right", "up", "down", "home", "end", "tab",
 ];
 
+const List<String> _defaultSelectionMenu = ["cut", "copy", "paste", "select_all"];
+
 class _FletEditorControlState extends State<FletEditorControl> {
   late final CodeLineEditingController _controller;
   Timer? _debounce;
@@ -111,6 +113,66 @@ class _FletEditorControlState extends State<FletEditorControl> {
   int? _pointer;
   final ValueNotifier<Offset?> _magnifierAt = ValueNotifier<Offset?>(null);
 
+  // Floating cut/copy/paste menu (re_editor only shows one when it is given a
+  // toolbar controller). Only used on Android/iOS.
+  late final MobileSelectionToolbarController _menuController =
+      MobileSelectionToolbarController(builder: _menuBuilder);
+
+  Widget _menuBuilder({
+    required BuildContext context,
+    required TextSelectionToolbarAnchors anchors,
+    required CodeLineEditingController controller,
+    required VoidCallback onDismiss,
+    required VoidCallback onRefresh,
+  }) {
+    final readOnly = widget.control.getBool("read_only", false)!;
+    final raw = widget.control.get("selection_menu_items");
+    final ids = raw is List
+        ? [for (final i in raw) i.toString()]
+        : _defaultSelectionMenu;
+    final loc = MaterialLocalizations.of(context);
+    final hasSelection = controller.selectedText.isNotEmpty;
+
+    final items = <ContextMenuButtonItem>[];
+    void add(String label, VoidCallback run) {
+      items.add(ContextMenuButtonItem(
+        label: label,
+        onPressed: () {
+          run();
+          onDismiss();
+        },
+      ));
+    }
+
+    for (final id in ids) {
+      switch (id) {
+        case "cut":
+          if (!readOnly && hasSelection) add(loc.cutButtonLabel, () => _cut());
+          break;
+        case "copy":
+          if (hasSelection) add(loc.copyButtonLabel, () => _copy());
+          break;
+        case "paste":
+          if (!readOnly) add(loc.pasteButtonLabel, () => _paste());
+          break;
+        case "select_all":
+          add(loc.selectAllButtonLabel, () => _controller.selectAll());
+          break;
+        case "undo":
+          if (!readOnly) add("Undo", () => _controller.undo());
+          break;
+        case "redo":
+          if (!readOnly) add("Redo", () => _controller.redo());
+          break;
+      }
+    }
+    if (items.isEmpty) return const SizedBox.shrink();
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: anchors,
+      buttonItems: items,
+    );
+  }
+
   bool get _isMobilePlatform =>
       defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS;
@@ -132,6 +194,7 @@ class _FletEditorControlState extends State<FletEditorControl> {
   void dispose() {
     _debounce?.cancel();
     _lpTimer?.cancel();
+    _menuController.hide(context);
     _magnifierAt.dispose();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
@@ -576,6 +639,7 @@ class _FletEditorControlState extends State<FletEditorControl> {
         ? [for (final i in itemsRaw) i.toString()]
         : _defaultToolbar;
     final scrollMode = control.getString("scroll_mode", "page_first")!;
+    final showMenu = mobile && control.getBool("selection_menu", true)!;
 
     Widget editor = CodeEditor(
       key: ValueKey("editor_$_epoch"),
@@ -584,6 +648,7 @@ class _FletEditorControlState extends State<FletEditorControl> {
       wordWrap: wrap,
       padding: const EdgeInsets.all(4),
       onChanged: _handleChanged,
+      toolbarController: showMenu ? _menuController : null,
       chunkAnalyzer: _chunkAnalyzer,
       style: CodeEditorStyle(
         fontFamily: fontFamily,

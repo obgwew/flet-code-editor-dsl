@@ -460,8 +460,8 @@ class CodeLanguage {
             add(pos, e, s.color);
             pos = e;
             matched = true;
+            break;
           }
-          break;
         }
       }
       if (matched) continue;
@@ -476,7 +476,16 @@ class CodeLanguage {
             (next == 120 || next == 88 || next == 98 || next == 66 ||
                 next == 111 || next == 79)) {
           e += 2;
-          while (e < n && (_isHex(line.codeUnitAt(e)) || line.codeUnitAt(e) == 95)) {
+          final isHexLit = next == 120 || next == 88;
+          final isBinLit = next == 98 || next == 66;
+          bool digitOk(int c) =>
+              c == 95 ||
+              (isHexLit
+                  ? _isHex(c)
+                  : isBinLit
+                      ? (c == 48 || c == 49)
+                      : (c >= 48 && c <= 55));
+          while (e < n && digitOk(line.codeUnitAt(e))) {
             e++;
           }
         } else {
