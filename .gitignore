@@ -7,3 +7,4 @@ dist/
 token.env
 .testenv/
 example/
+pubspec.lock
