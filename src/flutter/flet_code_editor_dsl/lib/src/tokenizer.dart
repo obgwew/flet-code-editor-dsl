@@ -149,8 +149,7 @@ class CodeLanguage {
     this.cEscape,
   });
 
-  bool get hasMultiline =>
-      blocks.isNotEmpty || strings.any((s) => s.multiline);
+  bool get hasMultiline => blocks.isNotEmpty || strings.any((s) => s.multiline);
 
   bool get hasFolding => folds.isNotEmpty || foldByIndent;
 
@@ -159,16 +158,17 @@ class CodeLanguage {
 
   /// Style of an erroneous range: the token color plus a red underline.
   TextStyle errorStyle(Color? base) => _errStyles.putIfAbsent(base, () {
-        final e = errors!;
-        return TextStyle(
-          color: base,
-          decoration: TextDecoration.underline,
-          decorationColor: e.color,
-          decorationStyle:
-              e.wavy ? TextDecorationStyle.wavy : TextDecorationStyle.solid,
-          decorationThickness: 1.5,
-        );
-      });
+    final e = errors!;
+    return TextStyle(
+      color: base,
+      decoration: TextDecoration.underline,
+      decorationColor: e.color,
+      decorationStyle: e.wavy
+          ? TextDecorationStyle.wavy
+          : TextDecorationStyle.solid,
+      decorationThickness: 1.5,
+    );
+  });
 
   factory CodeLanguage.fromJson(Map<String, dynamic> j) {
     Color? col(dynamic v) => parseHexColor(v?.toString());
@@ -183,6 +183,7 @@ class CodeLanguage {
       final color = col(g["color"]);
       if (color == null) continue;
       for (final w in (g["words"] as List? ?? const [])) {
+        if (w == null) continue;
         final k = w.toString();
         if (k.isEmpty) continue;
         words[norm(k)] = color;
@@ -191,20 +192,20 @@ class CodeLanguage {
 
     final lineComments = <String>[
       for (final s in (j["line_comments"] as List? ?? const []))
-        if (s.toString().isNotEmpty) s.toString()
+        if (s != null && s.toString().isNotEmpty) s.toString(),
     ]..sort((a, b) => b.length.compareTo(a.length));
 
     final blocks = <BlockRule>[
       for (final b in (j["block_comments"] as List? ?? const []))
         if (b is Map &&
-            b["start"].toString().isNotEmpty &&
-            b["end"].toString().isNotEmpty)
-          BlockRule(b["start"].toString(), b["end"].toString())
+            (b["start"]?.toString() ?? "").isNotEmpty &&
+            (b["end"]?.toString() ?? "").isNotEmpty)
+          BlockRule(b["start"].toString(), b["end"].toString()),
     ]..sort((a, b) => b.start.length.compareTo(a.start.length));
 
     final strings = <StringRule>[
       for (final s in (j["strings"] as List? ?? const []))
-        if (s is Map && s["open"].toString().isNotEmpty)
+        if (s is Map && (s["open"]?.toString() ?? "").isNotEmpty)
           StringRule(
             s["open"].toString(),
             (s["close"] == null || s["close"].toString().isEmpty)
@@ -214,28 +215,28 @@ class CodeLanguage {
                 ? null
                 : s["escape"].toString(),
             s["multiline"] == true,
-          )
+          ),
     ]..sort((a, b) => b.open.length.compareTo(a.open.length));
 
     final sigils = <Sigil>[
       for (final s in (j["sigils"] as List? ?? const []))
         if (s is Map &&
-            s["prefix"].toString().isNotEmpty &&
+            (s["prefix"]?.toString() ?? "").isNotEmpty &&
             col(s["color"]) != null)
-          Sigil(s["prefix"].toString(), col(s["color"])!)
+          Sigil(s["prefix"].toString(), col(s["color"])!),
     ]..sort((a, b) => b.prefix.length.compareTo(a.prefix.length));
 
     // ---- folding ----
     final folds = <FoldRuleSpec>[
       for (final f in (j["folds"] as List? ?? const []))
-        if (f is Map && f["start"].toString().isNotEmpty)
+        if (f is Map && (f["start"]?.toString() ?? "").isNotEmpty)
           FoldRuleSpec(
             f["start"].toString(),
             (f["end"] == null || f["end"].toString().isEmpty)
                 ? null
                 : f["end"].toString(),
             f["length"] is int ? f["length"] as int : null,
-          )
+          ),
     ];
 
     // ---- errors (optional) ----
@@ -261,11 +262,11 @@ class CodeLanguage {
         unknownWords: e["unknown_words"] == true,
         allowed: {
           for (final w in (e["allowed_words"] as List? ?? const []))
-            norm(w.toString())
+            norm(w.toString()),
         },
         forbidden: {
           for (final w in (e["forbidden_words"] as List? ?? const []))
-            norm(w.toString())
+            norm(w.toString()),
         },
         color: col(e["color"]) ?? const Color(0xFFF44747),
         wavy: e["wavy"] != false,
@@ -435,8 +436,13 @@ class CodeLanguage {
         final r = strings[si];
         if (line.startsWith(r.open, pos)) {
           final pos0 = pos;
-          final (np, closed) =
-              _scanString(line, pos + r.open.length, pos, r, add);
+          final (np, closed) = _scanString(
+            line,
+            pos + r.open.length,
+            pos,
+            r,
+            add,
+          );
           pos = np;
           if (!closed && !r.multiline && ec != null && ec.unterminatedStrings) {
             errs.add(LexError(pos0, n, "Unterminated string"));
@@ -469,12 +475,18 @@ class CodeLanguage {
       // ---- numbers ----
       if (numbers &&
           (_isDigit(ch) ||
-              (ch == 46 && pos + 1 < n && _isDigit(line.codeUnitAt(pos + 1))))) {
+              (ch == 46 &&
+                  pos + 1 < n &&
+                  _isDigit(line.codeUnitAt(pos + 1))))) {
         var e = pos;
         final next = pos + 1 < n ? line.codeUnitAt(pos + 1) : 0;
         if (ch == 48 &&
-            (next == 120 || next == 88 || next == 98 || next == 66 ||
-                next == 111 || next == 79)) {
+            (next == 120 ||
+                next == 88 ||
+                next == 98 ||
+                next == 66 ||
+                next == 111 ||
+                next == 79)) {
           e += 2;
           final isHexLit = next == 120 || next == 88;
           final isBinLit = next == 98 || next == 66;
@@ -483,26 +495,30 @@ class CodeLanguage {
               (isHexLit
                   ? _isHex(c)
                   : isBinLit
-                      ? (c == 48 || c == 49)
-                      : (c >= 48 && c <= 55));
+                  ? (c == 48 || c == 49)
+                  : (c >= 48 && c <= 55));
           while (e < n && digitOk(line.codeUnitAt(e))) {
             e++;
           }
         } else {
-          while (e < n && (_isDigit(line.codeUnitAt(e)) || line.codeUnitAt(e) == 95)) {
+          while (e < n &&
+              (_isDigit(line.codeUnitAt(e)) || line.codeUnitAt(e) == 95)) {
             e++;
           }
           if (e + 1 < n &&
               line.codeUnitAt(e) == 46 &&
               _isDigit(line.codeUnitAt(e + 1))) {
             e++;
-            while (e < n && (_isDigit(line.codeUnitAt(e)) || line.codeUnitAt(e) == 95)) {
+            while (e < n &&
+                (_isDigit(line.codeUnitAt(e)) || line.codeUnitAt(e) == 95)) {
               e++;
             }
           }
-          if (e < n && (line.codeUnitAt(e) == 101 || line.codeUnitAt(e) == 69)) {
+          if (e < n &&
+              (line.codeUnitAt(e) == 101 || line.codeUnitAt(e) == 69)) {
             var k = e + 1;
-            if (k < n && (line.codeUnitAt(k) == 43 || line.codeUnitAt(k) == 45)) {
+            if (k < n &&
+                (line.codeUnitAt(k) == 43 || line.codeUnitAt(k) == 45)) {
               k++;
             }
             if (k < n && _isDigit(line.codeUnitAt(k))) {
@@ -530,7 +546,8 @@ class CodeLanguage {
         var color = wordColor;
         if (color == null) {
           var k = e;
-          while (k < n && (line.codeUnitAt(k) == 32 || line.codeUnitAt(k) == 9)) {
+          while (k < n &&
+              (line.codeUnitAt(k) == 32 || line.codeUnitAt(k) == 9)) {
             k++;
           }
           final isCall = k < n && line.codeUnitAt(k) == 40;
@@ -606,13 +623,17 @@ class _Cached {
   final List<LexToken> tokens;
   final List<LexError> errors;
   const _Cached(
-      this.text, this.startState, this.endState, this.tokens, this.errors);
+    this.text,
+    this.startState,
+    this.endState,
+    this.tokens,
+    this.errors,
+  );
 }
 
 /// Common interface of the two highlighting engines (tokenizer / regex).
 abstract class CodeHighlighter {
-  void onLinesChanged(CodeLines lines);
-  @override
+  void onLinesChanged(CodeLines lines, {bool currentLineOnly = false});
   TextSpan build(
     CodeLines lines,
     int index,
@@ -636,7 +657,12 @@ class LineHighlighter implements CodeHighlighter {
 
   /// Call whenever the editor content changes.
   @override
-  void onLinesChanged(CodeLines lines) {
+  void onLinesChanged(CodeLines lines, {bool currentLineOnly = false}) {
+    if (!currentLineOnly) {
+      _cache.clear();
+      _validThrough = 0;
+      return;
+    }
     if (_cache.length > 20000) {
       _cache.clear();
       _validThrough = 0;
@@ -683,8 +709,7 @@ class LineHighlighter implements CodeHighlighter {
     return state;
   }
 
-  List<TextSpan> _spans(
-      String text, List<LexToken> toks, List<LexError> errs) {
+  List<TextSpan> _spans(String text, List<LexToken> toks, List<LexError> errs) {
     final out = <TextSpan>[];
     for (final t in toks) {
       final base = t.color == null ? null : language.styleFor(t.color!);
@@ -702,10 +727,12 @@ class LineHighlighter implements CodeHighlighter {
         final s = pts[k];
         final e = pts[k + 1];
         final bad = errs.any((er) => s >= er.start && e <= er.end);
-        out.add(TextSpan(
-          text: text.substring(s, e),
-          style: bad ? language.errorStyle(t.color) : base,
-        ));
+        out.add(
+          TextSpan(
+            text: text.substring(s, e),
+            style: bad ? language.errorStyle(t.color) : base,
+          ),
+        );
       }
     }
     return out;
@@ -833,8 +860,21 @@ class FoldAnalyzer implements CodeChunkAnalyzer {
       }
     }
 
-    chunks.sort((a, b) =>
-        a.index != b.index ? a.index.compareTo(b.index) : b.end.compareTo(a.end));
-    return chunks;
+    chunks.sort(
+      (a, b) => a.index != b.index
+          ? a.index.compareTo(b.index)
+          : b.end.compareTo(a.end),
+    );
+    // Several fold rules (or indentation plus a marker rule) can produce
+    // chunks starting on the same line. Keep the widest region for that line.
+    final unique = <CodeChunk>[];
+    for (final chunk in chunks) {
+      if (unique.isEmpty || unique.last.index != chunk.index) {
+        unique.add(chunk);
+      } else if (chunk.end > unique.last.end) {
+        unique[unique.length - 1] = chunk;
+      }
+    }
+    return unique;
   }
 }

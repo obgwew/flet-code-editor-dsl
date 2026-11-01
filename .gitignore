@@ -1,11 +1,9 @@
-@"
-__pycache__/
+﻿__pycache__/
 *.pyc
 *.egg-info/
 build/
 dist/
+.dart_tool/
 token.env
-MANIFEST.in
-"@ | Out-File -Encoding utf8 .gitignore
-example/
 .testenv/
+example/

@@ -20,6 +20,7 @@ from flet_code_editor_dsl.language import (
     TokenColors,
     WordGroup,
 )
+from flet_code_editor_dsl.search import SearchMatch, find_matches
 
 # Deprecated aliases (old names). Delete if you do not need them.
 FletCodeEditor = EditorTokens
@@ -33,4 +34,5 @@ __all__ = [
     "Language", "WordGroup", "StringRule", "BlockComment", "Sigil",
     "TokenColors", "FoldRule", "ErrorRules", "BracketPair",
     "FletCodeEditor", "FletCodeField",
+    "SearchMatch", "find_matches",
 ]

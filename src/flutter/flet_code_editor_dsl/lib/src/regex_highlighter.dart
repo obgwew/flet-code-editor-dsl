@@ -51,8 +51,15 @@ class RegexSpec {
         final color = parseHexColor(m["color"]?.toString());
         if (pattern == null || pattern.isEmpty || color == null) continue;
         try {
-          r.add(_RxRule(RegExp(pattern), color));
-        } catch (_) {/* invalid pattern: skip */}
+          r.add(
+            _RxRule(
+              RegExp(pattern, caseSensitive: m["ignore_case"] != true),
+              color,
+            ),
+          );
+        } catch (_) {
+          /* invalid pattern: skip */
+        }
       }
     }
     final e = <_RxErr>[];
@@ -62,7 +69,12 @@ class RegexSpec {
         final pattern = m["pattern"]?.toString();
         if (pattern == null || pattern.isEmpty) continue;
         try {
-          e.add(_RxErr(RegExp(pattern), m["message"]?.toString() ?? ""));
+          e.add(
+            _RxErr(
+              RegExp(pattern, caseSensitive: m["ignore_case"] != true),
+              m["message"]?.toString() ?? "",
+            ),
+          );
         } catch (_) {}
       }
     }
@@ -74,11 +86,13 @@ class RegexSpec {
         if (start.isEmpty) continue;
         final end = m["end"]?.toString();
         final len = m["length"];
-        f.add(FoldRuleSpec(
-          start,
-          (end == null || end.isEmpty) ? null : end,
-          len is num ? len.toInt() : null,
-        ));
+        f.add(
+          FoldRuleSpec(
+            start,
+            (end == null || end.isEmpty) ? null : end,
+            len is num ? len.toInt() : null,
+          ),
+        );
       }
     }
     return RegexSpec(
@@ -111,19 +125,21 @@ class RegexHighlighter implements CodeHighlighter {
 
   RegexHighlighter(this.spec, {this.showErrors = true});
 
-  TextStyle _style(Color c) => _styles.putIfAbsent(c, () => TextStyle(color: c));
+  TextStyle _style(Color c) =>
+      _styles.putIfAbsent(c, () => TextStyle(color: c));
 
   TextStyle _errorStyle(Color? base) => _errStyles.putIfAbsent(
-        base,
-        () => TextStyle(
-          color: base,
-          decoration: TextDecoration.underline,
-          decorationColor: spec.errorColor,
-          decorationStyle:
-              spec.wavy ? TextDecorationStyle.wavy : TextDecorationStyle.solid,
-          decorationThickness: 1.5,
-        ),
-      );
+    base,
+    () => TextStyle(
+      color: base,
+      decoration: TextDecoration.underline,
+      decorationColor: spec.errorColor,
+      decorationStyle: spec.wavy
+          ? TextDecorationStyle.wavy
+          : TextDecorationStyle.solid,
+      decorationThickness: 1.5,
+    ),
+  );
 
   _RxLine _lex(String line) {
     final hit = _cache[line];
@@ -167,8 +183,10 @@ class RegexHighlighter implements CodeHighlighter {
   }
 
   @override
-  void onLinesChanged(CodeLines lines) {
-    if (_cache.length > 5000) _cache.clear(); // keep the cache bounded
+  void onLinesChanged(CodeLines lines, {bool currentLineOnly = false}) {
+    // In document mode, re-evaluate all text after an edit. In current-line
+    // mode, retain cached spans for every unchanged line.
+    if (!currentLineOnly || _cache.length > 5000) _cache.clear();
   }
 
   List<TextSpan> _spans(String text, _RxLine l, bool withErrors) {
@@ -190,10 +208,12 @@ class RegexHighlighter implements CodeHighlighter {
         final s = pts[k];
         final e = pts[k + 1];
         final bad = errs.any((er) => s >= er.start && e <= er.end);
-        out.add(TextSpan(
-          text: text.substring(s, e),
-          style: bad ? _errorStyle(t.color) : base,
-        ));
+        out.add(
+          TextSpan(
+            text: text.substring(s, e),
+            style: bad ? _errorStyle(t.color) : base,
+          ),
+        );
       }
     }
     return out;
@@ -213,9 +233,12 @@ class RegexHighlighter implements CodeHighlighter {
     if (plainLength != text.length && !trailingNewline) return base;
 
     final l = _lex(text);
-    return TextSpan(style: style, children: [
-      ..._spans(text, l, showErrors),
-      if (trailingNewline) const TextSpan(text: "\n"),
-    ]);
+    return TextSpan(
+      style: style,
+      children: [
+        ..._spans(text, l, showErrors),
+        if (trailingNewline) const TextSpan(text: "\n"),
+      ],
+    );
   }
 }

@@ -4,10 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flet-code-editor-dsl"
-version = "0.3.0"
+version = "0.4.0"
 description = "Flet code editors with syntax highlighting: EditorTokens (tokenizer) and EditorRegex (regex)"
 requires-python = ">=3.10"
 dependencies = ["flet>=0.85.2"]
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "obgwew" }]
+
+[project.urls]
+Homepage = "https://github.com/obgwew/flet-code-editor-dsl"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -16,3 +22,11 @@ where = ["src"]
 # `flet build` looks for it in the installed `flutter/` package.
 [tool.setuptools.package-data]
 "flutter.flet_code_editor_dsl" = ["**/*"]
+
+[tool.setuptools.exclude-package-data]
+"flutter.flet_code_editor_dsl" = [
+  "build/**",
+  ".dart_tool/**",
+  "pubspec.lock",
+  "test/**",
+]

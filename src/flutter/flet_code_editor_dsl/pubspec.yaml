@@ -1,6 +1,6 @@
 name: flet_code_editor_dsl
 description: Flet code editors with syntax highlighting (EditorTokens / EditorRegex)
-version: 0.3.2
+version: 0.4.0
 publish_to: none
 
 environment:
@@ -8,7 +8,8 @@ environment:
   flutter: ">=1.17.0"
 
 dependencies:
-  re_editor: ^0.10.0
+  re_editor:
+    path: vendor/re_editor
   flet: ^0.85.2
   flutter:
     sdk: flutter
